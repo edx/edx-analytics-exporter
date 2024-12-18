@@ -95,6 +95,7 @@ def export_organization_data(config, destination):
         log.info("Using environment %s", environment)
 
         kwargs = get_config_for_env(config, environment)
+        print(kwargs)
         kwargs['work_dir'] = destination
 
         courses = get_org_courses(**kwargs)
