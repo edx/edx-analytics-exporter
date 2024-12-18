@@ -87,6 +87,7 @@ def update_environments(config):
     auth_filename = values.get('auth_file')
     if auth_filename:
         auth_filename = auth_filename.format(WORKSPACE=os.environ['WORKSPACE'])
+        print(auth_filename)
         if os.path.exists(auth_filename):
             with open(auth_filename) as auth_file:
                 tokens.update(json.load(auth_file))
