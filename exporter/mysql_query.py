@@ -44,7 +44,7 @@ class MysqlDumpQueryToTSV(object):
         All embeded tabs(\t), newlines(\n), and carriage returns(\r) are escaped.
         """
 
-        writer = csv.writer(output_file, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar='', lineterminator='\n')
+        writer = csv.writer(output_file, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=None, lineterminator='\n')
 
         writer.writerow(cursor.column_names)
 
