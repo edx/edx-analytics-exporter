@@ -1,4 +1,4 @@
-import mock
+from unittest import mock
 
 from exporter import main, tasks
 
