@@ -1,13 +1,15 @@
 # Application
-awscli
+# Upper bounds keep the weekly export from silently picking up a new major
+# release; bump them deliberately after testing.
+awscli>=1.40,<2
 docopt
-edx-ccx-keys
-edx-opaque-keys
+edx-ccx-keys>=2,<3
+edx-opaque-keys>=4,<5
 graphitesend==0.10.0 # Apache
-mysql-connector-python>=9.0
+mysql-connector-python>=9,<27
 path.py
 pbr
-pymongo
+pymongo>=4,<5
 python-dateutil
 python-gnupg==0.4.4
 pyyaml
