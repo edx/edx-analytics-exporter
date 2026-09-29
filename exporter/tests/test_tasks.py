@@ -3,9 +3,10 @@
 import os
 from copy import deepcopy
 
+from unittest import mock
+
 from exporter import tasks
 
-import mock
 import pytest
 
 

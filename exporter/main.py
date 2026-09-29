@@ -41,10 +41,10 @@ Options:
 from contextlib import contextmanager
 from copy import copy
 import datetime
-from distutils.spawn import find_executable  # pylint: disable=import-error, no-name-in-module
 import logging
 import logging.config
 import os
+import shutil
 import sys
 import subprocess
 import tempfile
@@ -214,7 +214,7 @@ def archive_directory(config, directory):
     root_dir = os.path.dirname(directory)
     base_dir = os.path.basename(directory)
 
-    if not find_executable("zip"):
+    if not shutil.which("zip"):
         raise FatalTaskError("The analytics exporter requires zip on the PATH.")
 
     log.info('Archiving %s', directory)

@@ -40,7 +40,9 @@ def main():
 
 
 def check_export(general_config):
-    start_timestamp = datetime.datetime.utcnow()
+    # Naive UTC timestamp (utcnow() is deprecated in Python 3.12); kept naive because it is
+    # compared with the naive datetimes parsed from S3 LastModified below.
+    start_timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
     bucket_file_metadata = {}
     most_recent_file_per_org = {}

@@ -31,7 +31,7 @@ Assuming you have virtualenv and virtualenv-wrapper installed, from the
 project root run:
 
 ```
-mkvirtualenv analytic-exporter
-pip install -r github_requirements.txt
+mkvirtualenv analytic-exporter          # Python 3.12
+pip install -r requirements.txt
 pip install -e .
 ```
