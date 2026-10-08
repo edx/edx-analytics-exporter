@@ -1,20 +1,21 @@
 # Application
-awscli
+# Upper bounds keep the weekly export from silently picking up a new major
+# release; bump them deliberately after testing.
+awscli>=1.40,<2
 docopt
-edx-ccx-keys==1.1.0 # Pinned for python 2.7 compatibility
-edx-opaque-keys==2.1.1 # Pinned for python 2.7 compatibility
+edx-ccx-keys>=2,<3
+edx-opaque-keys>=4,<5
 graphitesend==0.10.0 # Apache
+mysql-connector-python>=9,<27
 path.py
 pbr
-pip==19.2.3		
-pymongo
+pymongo>=4,<5
 python-dateutil
 python-gnupg==0.4.4
 pyyaml
 psutil
 
 # Tests
-coverage==4.3.4
-mock==2.0.0
-pytest==3.0.7
-pytest-cov==2.4.0
+coverage>=7.3
+pytest>=8.0
+pytest-cov>=5.0

@@ -3,10 +3,10 @@
 import hashlib
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import traceback
-import distutils
 
 from opaque_keys.edx.keys import CourseKey
 
@@ -305,7 +305,7 @@ class CopyS3FileTask(Task):
     def run(cls, filename, dry_run, **kwargs):
         super(CopyS3FileTask, cls).run(filename, dry_run, **kwargs)
 
-        if not distutils.spawn.find_executable("aws"):
+        if not shutil.which("aws"):
             raise FatalTaskError("The {0} task requires the awscli".format(cls.__name__))
 
         file_basename = os.path.basename(filename)
