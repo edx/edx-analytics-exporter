@@ -12,7 +12,7 @@ from opaque_keys.edx.keys import CourseKey
 
 from exporter.config import setup_logging
 from exporter.mysql_query import MysqlDumpQueryToTSV
-from exporter.util import NotSet, execute_shell
+from exporter.util import NotSet, execute_shell, memoize
 
 
 setup_logging()
@@ -1008,9 +1008,213 @@ class WorkflowAssessmentWorkflowStepTask(ORA2CourseTask, SQLTask):
 
 # End ORA2 Tables ==================
 
+# Start Forum Tables ==================
+
+FORUM_MYSQL_BACKEND_FLAG = 'forum_v2.enable_mysql_backend'
+
+# Mirrors edx-platform's CourseWaffleFlag outside a request: the newest course override applies if it is enabled,
+# then the newest org override, then the flag's "Everyone" setting.
+FORUM_MYSQL_BACKEND_SQL = """
+SELECT COALESCE(
+    (SELECT IF(enabled, override_choice='on', NULL)
+     FROM waffle_utils_waffleflagcourseoverridemodel
+     WHERE waffle_flag='{flag}' AND course_id='{course}'
+     ORDER BY change_date DESC LIMIT 1),
+    (SELECT IF(enabled, override_choice='on', NULL)
+     FROM waffle_utils_waffleflagorgoverridemodel
+     WHERE waffle_flag='{flag}' AND org='{org}'
+     ORDER BY change_date DESC LIMIT 1),
+    (SELECT everyone=1 FROM waffle_flag WHERE name='{flag}'),
+    0)
+"""
+
+
+def forum_on_mysql(**kwargs):
+    """Returns whether the course's forum is stored in MySQL (forum_v2.enable_mysql_backend is on for it)."""
+    return _forum_on_mysql(
+        kwargs.get('sql_host'), kwargs.get('sql_user'), kwargs.get('sql_password'), kwargs.get('sql_db'),
+        kwargs['course'],
+    )
+
+
+@memoize
+def _forum_on_mysql(sql_host, sql_user, sql_password, sql_db, course):
+    # Memoized so that every forum task in a run makes the same choice for a course.
+    query = clean_command(FORUM_MYSQL_BACKEND_SQL).format(
+        flag=FORUM_MYSQL_BACKEND_FLAG,
+        course=course,
+        org=CourseKey.from_string(course).org,
+    )
+    log.debug(query)
+    value = MysqlDumpQueryToTSV(sql_host, sql_user, sql_password, sql_db, None).fetch_value(query)
+    return int(value or 0) == 1
+
+
+class ForumMySQLTask(CourseTask, SQLTask):
+    """
+    Forum posts for a course whose forum is stored in MySQL, one row per thread, response (depth 0) and comment on a
+    response (depth 1). Courses still on MongoDB get ForumsTask's mongoexport instead, so each course gets one or the
+    other.
+
+    As in the MongoDB records, each post carries its votes, abuse reports (open ones in abuse_flaggers, ones a
+    moderator has cleared in historical_abuse_flaggers) and edit history, as JSON arrays.
+    """
+    NAME = 'forum'
+    SQL = """
+    SELECT p.content_type,
+           p.id,
+           p.course_id,
+           p.comment_thread_id,
+           p.parent_id,
+           p.depth,
+           p.commentable_id,
+           p.context,
+           p.thread_type,
+           p.title,
+           p.body,
+           p.author_id,
+           p.author_username,
+           p.anonymous,
+           p.anonymous_to_peers,
+           p.group_id,
+           p.visible,
+           p.closed,
+           p.closed_by_id,
+           p.close_reason_code,
+           p.pinned,
+           p.endorsed,
+           p.endorsement,
+           p.child_count,
+           p.is_spam,
+           p.is_deleted,
+           p.deleted_at,
+           p.deleted_by_id,
+           p.created_at,
+           p.updated_at,
+           p.last_activity_at,
+           CAST(COALESCE(
+               (SELECT JSON_ARRAYAGG(JSON_OBJECT('user_id', v.user_id, 'vote', v.vote))
+                FROM forum_uservote AS v
+                WHERE v.content_type_id=p.content_type_id AND v.content_object_id=p.id),
+               JSON_ARRAY()) AS CHAR) AS votes,
+           CAST(COALESCE(
+               (SELECT JSON_ARRAYAGG(JSON_OBJECT('user_id', f.user_id, 'flagged_at', f.flagged_at))
+                FROM forum_abuseflagger AS f
+                WHERE f.content_type_id=p.content_type_id AND f.content_object_id=p.id),
+               JSON_ARRAY()) AS CHAR) AS abuse_flaggers,
+           CAST(COALESCE(
+               (SELECT JSON_ARRAYAGG(JSON_OBJECT('user_id', f.user_id, 'flagged_at', f.flagged_at))
+                FROM forum_historicalabuseflagger AS f
+                WHERE f.content_type_id=p.content_type_id AND f.content_object_id=p.id),
+               JSON_ARRAY()) AS CHAR) AS historical_abuse_flaggers,
+           CAST(COALESCE(
+               (SELECT JSON_ARRAYAGG(JSON_OBJECT('editor_id', e.editor_id,
+                                                 'reason_code', e.reason_code,
+                                                 'original_body', e.original_body,
+                                                 'created_at', e.created_at))
+                FROM forum_edithistory AS e
+                WHERE e.content_type_id=p.content_type_id AND e.content_object_id=p.id),
+               JSON_ARRAY()) AS CHAR) AS edit_history
+    FROM (
+        SELECT ct.id AS content_type_id,
+               'commentthread' AS content_type,
+               t.id,
+               t.course_id,
+               NULL AS comment_thread_id,
+               NULL AS parent_id,
+               NULL AS depth,
+               t.commentable_id,
+               t.context,
+               t.thread_type,
+               t.title,
+               t.body,
+               t.author_id,
+               COALESCE(t.author_username, t.retired_username, au.username) AS author_username,
+               t.anonymous,
+               t.anonymous_to_peers,
+               t.group_id,
+               t.visible,
+               t.closed,
+               t.closed_by_id,
+               t.close_reason_code,
+               t.pinned,
+               NULL AS endorsed,
+               NULL AS endorsement,
+               NULL AS child_count,
+               t.is_spam,
+               t.is_deleted,
+               t.deleted_at,
+               t.deleted_by_id,
+               t.created_at,
+               t.updated_at,
+               t.last_activity_at
+        FROM forum_commentthread AS t
+        INNER JOIN django_content_type AS ct ON ct.app_label='forum' AND ct.model='commentthread'
+        LEFT JOIN auth_user AS au ON au.id=t.author_id
+        WHERE t.course_id='{course}'
+        UNION ALL
+        SELECT ct.id AS content_type_id,
+               'comment' AS content_type,
+               c.id,
+               c.course_id,
+               c.comment_thread_id,
+               c.parent_id,
+               c.depth,
+               NULL AS commentable_id,
+               NULL AS context,
+               NULL AS thread_type,
+               NULL AS title,
+               c.body,
+               c.author_id,
+               COALESCE(c.author_username, c.retired_username, au.username) AS author_username,
+               c.anonymous,
+               c.anonymous_to_peers,
+               c.group_id,
+               c.visible,
+               NULL AS closed,
+               NULL AS closed_by_id,
+               NULL AS close_reason_code,
+               NULL AS pinned,
+               c.endorsed,
+               CAST(c.endorsement AS CHAR) AS endorsement,
+               c.child_count,
+               c.is_spam,
+               c.is_deleted,
+               c.deleted_at,
+               c.deleted_by_id,
+               c.created_at,
+               c.updated_at,
+               NULL AS last_activity_at
+        FROM forum_comment AS c
+        INNER JOIN django_content_type AS ct ON ct.app_label='forum' AND ct.model='comment'
+        LEFT JOIN auth_user AS au ON au.id=c.author_id
+        WHERE c.course_id='{course}'
+    ) AS p
+    ORDER BY p.created_at, p.id
+    """
+
+    @classmethod
+    def run(cls, filename, dry_run, **kwargs):
+        if not dry_run and not forum_on_mysql(**kwargs):
+            log.info('Forum for %s is in MongoDB, skipping %s.', kwargs['course'], cls.NAME)
+            return
+        super(ForumMySQLTask, cls).run(filename, dry_run, **kwargs)
+
+
 class ForumsTask(CourseTask, MongoTask):
+    """
+    Forum posts exported from MongoDB. Courses whose forum is in MySQL get the ForumMySQLTask table instead,
+    because their MongoDB copy stops being updated once they move.
+    """
     NAME = ''
     QUERY = '{{"course_id": "{course}"}}'
+
+    @classmethod
+    def run(cls, filename, dry_run, **kwargs):
+        if not dry_run and forum_on_mysql(**kwargs):
+            log.info('Forum for %s is in MySQL, skipping the MongoDB export.', kwargs['course'])
+            return
+        super(ForumsTask, cls).run(filename, dry_run, **kwargs)
 
     @classmethod
     def get_filename(cls, **kwargs):
@@ -1115,6 +1319,7 @@ DEFAULT_TASKS = [
     WikiArticleRevisionTask,
     UserCourseTagTask,
     ForumsTask,
+    ForumMySQLTask,
     CourseStructureTask,
     CourseContentTask,
     CourseRoleTask,

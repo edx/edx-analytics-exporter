@@ -26,6 +26,17 @@ class MysqlDumpQueryToTSV(object):
             finally:
                 cursor.close()
 
+    def fetch_value(self, query):
+        """Returns the first column of the first row of the query, or None if there are no rows."""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+        return rows[0][0] if rows else None
+
     def _connect(self):
         connection = mysql.connector.connect(
             host=self.host,
